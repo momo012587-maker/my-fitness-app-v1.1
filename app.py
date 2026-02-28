@@ -1,178 +1,115 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
+import streamlit as st
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.dates as mdates
 import datetime
 
-class FitnessTrackerApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("飲食與體重趨勢紀錄")
-        self.root.geometry("800x800")
-        self.root.configure(padx=20, pady=20)
+# 設定網頁標題
+st.set_page_config(page_title="飲食與體重趨勢紀錄")
+st.title("飲食與體重趨勢紀錄")
 
-        # === 1. TDEE 計算區塊 ===
-        frame_tdee = ttk.LabelFrame(self.root, text="1. 計算 TDEE (每日總熱量消耗)", padding=(10, 10))
-        frame_tdee.pack(fill="x", pady=5)
+# --- 1. 計算 TDEE ---
+st.header("1. 計算 TDEE (每日總熱量消耗)")
 
-        ttk.Label(frame_tdee, text="基礎代謝率 (BMR):").grid(row=0, column=0, sticky="w", pady=5)
-        self.entry_bmr = ttk.Entry(frame_tdee, width=15)
-        self.entry_bmr.grid(row=0, column=1, padx=10, pady=5)
-        self.entry_bmr.bind("<KeyRelease>", self.calculate_tdee)
+col1, col2 = st.columns(2)
+with col1:
+    bmr = st.number_input("基礎代謝率 (BMR):", min_value=0, value=1600, step=50)
 
-        ttk.Label(frame_tdee, text="平常活動狀態:").grid(row=1, column=0, sticky="w", pady=5)
-        self.activity_var = tk.DoubleVar(value=1.2)
-        activity_options = [
-            ("久坐 (幾乎不運動)", 1.2),
-            ("輕度活動 (每週運動 1-3 天)", 1.375),
-            ("中度活動 (每週運動 3-5 天)", 1.55),
-            ("高度活動 (每週運動 6-7 天)", 1.725),
-            ("極度活動 (勞力工作或高強度訓練)", 1.9)
-        ]
-        self.combo_activity = ttk.Combobox(frame_tdee, width=30, state="readonly")
-        self.combo_activity['values'] = [text for text, val in activity_options]
-        self.combo_activity.current(0)
-        self.combo_activity.grid(row=1, column=1, padx=10, pady=5)
-        self.combo_activity.bind("<<ComboboxSelected>>", self.update_activity_val)
+with col2:
+    activity_options = {
+        "久坐 (幾乎不運動)": 1.2,
+        "輕度活動 (每週運動 1-3 天)": 1.375,
+        "中度活動 (每週運動 3-5 天)": 1.55,
+        "高度活動 (每週運動 6-7 天)": 1.725,
+        "極度活動 (勞力工作或高強度訓練)": 1.9
+    }
+    activity_text = st.selectbox("平常活動狀態:", list(activity_options.keys()))
 
-        self.label_tdee_result = ttk.Label(frame_tdee, text="目前 TDEE: 0 大卡", foreground="red", font=("Arial", 11, "bold"))
-        self.label_tdee_result.grid(row=2, column=0, columnspan=2, sticky="w", pady=10)
+# 即時計算 TDEE
+activity_multiplier = activity_options[activity_text]
+current_tdee = bmr * activity_multiplier
+st.markdown(f"**目前 TDEE:** :red[{round(current_tdee)}] **大卡**")
+st.divider()
 
-        self.activity_dict = {text: val for text, val in activity_options}
+# --- 2. 食物熱量與營養素輸入 ---
+st.header("2. 食物熱量與營養素")
+st.caption("輸入部分數值後，點擊「自動計算缺項」按鈕推算剩餘欄位 (碳水/蛋白質 1g=4大卡, 脂肪 1g=9大卡)")
 
-        # === 2. 食物熱量與營養素輸入區塊 ===
-        frame_food = ttk.LabelFrame(self.root, text="2. 食物熱量與營養素 (輸入部分數值後點擊自動補全)", padding=(10, 10))
-        frame_food.pack(fill="x", pady=5)
+# 初始化 Session State 以便保留與更新輸入框的數值
+if "cal" not in st.session_state: st.session_state.cal = None
+if "p" not in st.session_state: st.session_state.p = None
+if "c" not in st.session_state: st.session_state.c = None
+if "f" not in st.session_state: st.session_state.f = None
 
-        labels = ["總熱量 (kcal)", "蛋白質 (g)", "碳水化合物 (g)", "脂肪 (g)"]
-        self.entries_macro = {}
-        for i, text in enumerate(labels):
-            ttk.Label(frame_food, text=text).grid(row=0, column=i, padx=5, pady=5)
-            entry = ttk.Entry(frame_food, width=12)
-            entry.grid(row=1, column=i, padx=5, pady=5)
-            self.entries_macro[text] = entry
+def auto_fill_macros():
+    cal = st.session_state.cal
+    p = st.session_state.p
+    c = st.session_state.c
+    f = st.session_state.f
+    
+    # 情況 A: 有三大營養素，算總熱量
+    if cal is None and None not in (p, c, f):
+        st.session_state.cal = float(round(p * 4 + c * 4 + f * 9, 1))
+    
+    # 情況 B: 有總熱量及其中兩個，算剩下的一個
+    elif cal is not None:
+        if p is None and None not in (c, f):
+            st.session_state.p = float(max(0.0, round((cal - c * 4 - f * 9) / 4, 1)))
+        elif c is None and None not in (p, f):
+            st.session_state.c = float(max(0.0, round((cal - p * 4 - f * 9) / 4, 1)))
+        elif f is None and None not in (p, c):
+            st.session_state.f = float(max(0.0, round((cal - p * 4 - c * 4) / 9, 1)))
 
-        btn_auto_fill = ttk.Button(frame_food, text="自動計算缺項", command=self.auto_fill_macros)
-        btn_auto_fill.grid(row=2, column=0, columnspan=4, pady=10)
+col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+with col_m1: st.number_input("總熱量 (kcal)", key="cal", value=None)
+with col_m2: st.number_input("蛋白質 (g)", key="p", value=None)
+with col_m3: st.number_input("碳水化合物 (g)", key="c", value=None)
+with col_m4: st.number_input("脂肪 (g)", key="f", value=None)
 
-        frame_settings = ttk.Frame(frame_food)
-        frame_settings.grid(row=3, column=0, columnspan=4, pady=5, sticky="w")
-        ttk.Label(frame_settings, text="目前體重 (kg):").pack(side="left")
-        self.entry_weight = ttk.Entry(frame_settings, width=10)
-        self.entry_weight.insert(0, "70")
-        self.entry_weight.pack(side="left", padx=5)
+st.button("自動計算缺項", on_click=auto_fill_macros, type="primary")
 
-        # === 3. 趨勢圖區塊 ===
-        frame_chart = ttk.LabelFrame(self.root, text="3. 體重趨勢圖 (未來 30 天模擬)", padding=(10, 10))
-        frame_chart.pack(fill="both", expand=True, pady=5)
+weight = st.number_input("目前體重 (kg):", min_value=30.0, value=70.0, step=0.1)
+st.divider()
 
-        btn_update_chart = ttk.Button(frame_chart, text="更新赤字與圖表", command=self.update_chart)
-        btn_update_chart.pack(pady=5)
+# --- 3. 趨勢圖區塊 ---
+st.header("3. 體重趨勢圖 (未來 30 天模擬)")
 
-        self.fig, self.ax = plt.subplots(figsize=(7, 4))
-        self.canvas = FigureCanvasTkAgg(self.fig, master=frame_chart)
-        self.canvas.get_tk_widget().pack(fill="both", expand=True)
-
-        self.current_tdee = 0
-
-    def update_activity_val(self, event=None):
-        selected_text = self.combo_activity.get()
-        self.activity_var.set(self.activity_dict[selected_text])
-        self.calculate_tdee()
-
-    def calculate_tdee(self, event=None):
-        try:
-            bmr = float(self.entry_bmr.get())
-            activity = self.activity_var.get()
-            self.current_tdee = bmr * activity
-            self.label_tdee_result.config(text=f"目前 TDEE: {round(self.current_tdee)} 大卡")
-        except ValueError:
-            self.current_tdee = 0
-            self.label_tdee_result.config(text="目前 TDEE: 0 大卡")
-
-    def get_float_or_none(self, entry):
-        val = entry.get().strip()
-        if not val:
-            return None
-        try:
-            return float(val)
-        except ValueError:
-            return None
-
-    def auto_fill_macros(self):
-        cal = self.get_float_or_none(self.entries_macro["總熱量 (kcal)"])
-        p = self.get_float_or_none(self.entries_macro["蛋白質 (g)"])
-        c = self.get_float_or_none(self.entries_macro["碳水化合物 (g)"])
-        f = self.get_float_or_none(self.entries_macro["脂肪 (g)"])
-
-        # 情況 A: 有三大營養素，算總熱量
-        if cal is None and None not in (p, c, f):
-            cal = p * 4 + c * 4 + f * 9
-            self.entries_macro["總熱量 (kcal)"].delete(0, tk.END)
-            self.entries_macro["總熱量 (kcal)"].insert(0, str(round(cal, 1)))
+if st.button("更新赤字與圖表", type="primary"):
+    cal = st.session_state.cal
+    if cal is None:
+        st.error("請確保「總熱量」已填寫完整數值。")
+    elif current_tdee <= 0:
+        st.error("請先輸入正確的 BMR 並選擇活動量以計算 TDEE。")
+    else:
+        fig, ax = plt.subplots(figsize=(8, 4))
         
-        # 情況 B: 有總熱量及其中兩個，算剩下的一個
-        elif cal is not None:
-            if p is None and None not in (c, f):
-                p = (cal - c * 4 - f * 9) / 4
-                self.entries_macro["蛋白質 (g)"].delete(0, tk.END)
-                self.entries_macro["蛋白質 (g)"].insert(0, str(max(0, round(p, 1))))
-            elif c is None and None not in (p, f):
-                c = (cal - p * 4 - f * 9) / 4
-                self.entries_macro["碳水化合物 (g)"].delete(0, tk.END)
-                self.entries_macro["碳水化合物 (g)"].insert(0, str(max(0, round(c, 1))))
-            elif f is None and None not in (p, c):
-                f = (cal - p * 4 - c * 4) / 9
-                self.entries_macro["脂肪 (g)"].delete(0, tk.END)
-                self.entries_macro["脂肪 (g)"].insert(0, str(max(0, round(f, 1))))
-
-    def update_chart(self):
-        try:
-            weight = float(self.entry_weight.get())
-            intake_cal = float(self.entries_macro["總熱量 (kcal)"].get())
-        except ValueError:
-            messagebox.showwarning("輸入錯誤", "請確保體重與總熱量皆已填寫完整數值。")
-            return
-
-        if self.current_tdee <= 0:
-            messagebox.showwarning("輸入錯誤", "請先輸入正確的 BMR 並選擇活動量以計算 TDEE。")
-            return
-
-        self.ax.clear()
-
         # 準備資料：未來 30 天
         days = 30
         today = datetime.date.today()
         dates = [today + datetime.timedelta(days=i) for i in range(days)]
         
-        # 理論赤字：假設標準每天 -500 大卡 (約每週減 0.5kg)
+        # 理論赤字：假設標準每天 -500 大卡
         theoretical_deficit = 500
         theoretical_loss_per_day = theoretical_deficit / 7700
         theoretical_weights = [weight - (theoretical_loss_per_day * i) for i in range(days)]
 
         # 實際模擬赤字：依照目前 TDEE 減去輸入的總攝取熱量
-        actual_deficit = self.current_tdee - intake_cal
+        actual_deficit = current_tdee - cal
         actual_loss_per_day = actual_deficit / 7700
         actual_weights = [weight - (actual_loss_per_day * i) for i in range(days)]
 
         # 繪圖
-        self.ax.plot(dates, theoretical_weights, linestyle='--', color='blue', label='理論目標 (每日 -500kcal)')
-        self.ax.plot(dates, actual_weights, linestyle='-', color='red', label=f'實際模擬 (目前赤字 {round(actual_deficit)}kcal)')
+        ax.plot(dates, theoretical_weights, linestyle='--', color='blue', label='理論目標 (每日 -500kcal)')
+        ax.plot(dates, actual_weights, linestyle='-', color='red', label=f'實際模擬 (目前赤字 {round(actual_deficit)}kcal)')
 
         # 設定 X 軸為日期格式
-        self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
-        self.ax.xaxis.set_major_locator(mdates.DayLocator(interval=5))
-        self.fig.autofmt_xdate()
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+        ax.xaxis.set_major_locator(mdates.DayLocator(interval=5))
+        fig.autofmt_xdate()
 
-        self.ax.set_title("未來 30 天體重下降模擬")
-        self.ax.set_ylabel("體重 (kg)")
-        self.ax.legend()
-        self.ax.grid(True, linestyle=':', alpha=0.6)
+        ax.set_title("未來 30 天體重下降模擬")
+        ax.set_ylabel("體重 (kg)")
+        ax.legend()
+        ax.grid(True, linestyle=':', alpha=0.6)
 
-        self.canvas.draw()
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = FitnessTrackerApp(root)
-    root.mainloop()
+        # 在 Streamlit 中顯示 matplotlib 圖表
+        st.pyplot(fig)
