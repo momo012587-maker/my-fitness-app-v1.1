@@ -17,10 +17,15 @@ with tab1:
     col_in, col_tgt = st.columns(2)
     with col_in:
         st.subheader("📑 Step 1: 獲取目前身體數據")
-        if st.button("📸 模擬上傳 InBody 報告 (自動填入)"):
+        # 加入真正的檔案上傳器
+        uploaded_file = st.file_uploader("📸 上傳 InBody 照片", type=['jpg', 'png', 'jpeg'])
+        
+        # 只有當你真的選了照片上傳後，才會跑出提示並更新數字
+        if uploaded_file is not None:
+            st.success("✅ 照片已成功上傳！(目前為展示模式，暫時帶入模擬數值，可手動修改)")
+            # 這裡之後會換成真正的 AI 辨識程式碼
             st.session_state.c_w = 78.5
             st.session_state.c_bf = 22.5
-            st.success("✅ AI 讀取成功！")
         
         c_w = st.number_input("目前體重 (kg)", value=st.session_state.c_w, step=0.1)
         c_bf = st.number_input("目前體脂 (%)", value=st.session_state.c_bf, step=0.1)
