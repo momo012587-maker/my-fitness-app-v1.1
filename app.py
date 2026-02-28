@@ -92,13 +92,18 @@ with tab1:
             st.session_state.target_f = int((daily_target * 0.25) / 9)
             
             st.write(f"### 🍽️ 為了在 **{st.session_state.weeks} 週** 內減去 **{total_loss:.1f} kg**：")
-            st.write(f"系統判定你的 TDEE 約為 **{tdee} kcal**喵！")
             
+            # --- 修改：分開標示 BMR 與 TDEE ---
+            col_b1, col_b2 = st.columns(2)
+            col_b1.info(f"🔥 **基礎代謝率 (BMR):** {int(calc_bmr)} kcal")
+            col_b2.info(f"⚡ **每日總熱量消耗 (TDEE):** {int(tdee)} kcal")
+            
+            st.write("貓咪教練幫你計算的每日建議攝取目標如下喵：")
             m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-            m_col1.metric("建議每日攝取", f"{daily_target} kcal", f"赤字 {int(tdee - daily_target)} kcal", delta_color="inverse")
-            m_col2.metric("🍗 蛋白質", f"{st.session_state.target_p} g")
-            m_col3.metric("🍚 碳水", f"{st.session_state.target_c} g")
-            m_col4.metric("🥑 脂肪", f"{st.session_state.target_f} g")
+            m_col1.metric("建議每日總熱量", f"{daily_target} kcal", f"每日赤字 {int(tdee - daily_target)} kcal", delta_color="inverse")
+            m_col2.metric("🍗 目標蛋白質", f"{st.session_state.target_p} g")
+            m_col3.metric("🍚 目標碳水", f"{st.session_state.target_c} g")
+            m_col4.metric("🥑 目標脂肪", f"{st.session_state.target_f} g")
 
 # ==========================================
 # Tab 2: 飲食記帳本 
@@ -164,11 +169,29 @@ with tab2:
 
         st.subheader(f"📊 {view_date} 單日攝取狀況")
         if t_cal > 0:
+            # --- 修改：以顏色區分實際達標狀況 ---
+            c_cal = "green" if total_cal <= t_cal else "red"
+            c_p = "green" if total_p >= t_p else "red"  # 蛋白質大於等於目標才是綠色
+            c_c = "green" if total_c <= t_c else "red"
+            c_f = "green" if total_f <= t_f else "red"
+
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("總熱量 (kcal)", f"{round(total_cal)} / {t_cal}", f"剩餘 {t_cal - round(total_cal)} kcal", delta_color="normal")
-            m2.metric("蛋白質 (g)", f"{round(total_p)} / {t_p}", f"剩餘 {t_p - round(total_p)} g", delta_color="normal")
-            m3.metric("碳水 (g)", f"{round(total_c)} / {t_c}", f"剩餘 {t_c - round(total_c)} g", delta_color="normal")
-            m4.metric("脂肪 (g)", f"{round(total_f)} / {t_f}", f"剩餘 {t_f - round(total_f)} g", delta_color="normal")
+            with m1:
+                st.markdown("**總熱量 (kcal)**")
+                st.markdown(f"### :{c_cal}[{round(total_cal)}] / {t_cal}")
+                st.caption(f"差值: {t_cal - round(total_cal)} kcal")
+            with m2:
+                st.markdown("**蛋白質 (g)**")
+                st.markdown(f"### :{c_p}[{round(total_p)}] / {t_p}")
+                st.caption(f"差值: {t_p - round(total_p)} g")
+            with m3:
+                st.markdown("**碳水 (g)**")
+                st.markdown(f"### :{c_c}[{round(total_c)}] / {t_c}")
+                st.caption(f"差值: {t_c - round(total_c)} g")
+            with m4:
+                st.markdown("**脂肪 (g)**")
+                st.markdown(f"### :{c_f}[{round(total_f)}] / {t_f}")
+                st.caption(f"差值: {t_f - round(total_f)} g")
 
             st.markdown("### 💡 貓咪教練的加餐建議")
             diff_p = t_p - total_p
@@ -206,7 +229,7 @@ with tab2:
 
     st.divider()
 
-    # --- 新增：歷史數據總覽 (週/月 表格) ---
+    # --- 歷史數據總覽 (週/月 表格) ---
     st.subheader("📆 歷史數據總覽")
     view_range = st.radio("檢視範圍", ["近 7 天 (週)", "近 30 天 (月)", "全部紀錄"], horizontal=True)
     
@@ -215,7 +238,6 @@ with tab2:
         df_history['日期'] = pd.to_datetime(df_history['日期']).dt.date
         today_date = datetime.today().date()
         
-        # 依照選擇範圍篩選
         if "7" in view_range:
             cutoff = today_date - timedelta(days=7)
             df_history = df_history[df_history['日期'] > cutoff]
@@ -224,11 +246,8 @@ with tab2:
             df_history = df_history[df_history['日期'] > cutoff]
             
         if not df_history.empty:
-            # 依照日期進行加總
             summary_table = df_history.groupby('日期')[['熱量(kcal)', '蛋白質(g)', '碳水(g)', '脂肪(g)']].sum().reset_index()
-            # 將最新的日期排在最上面
             summary_table = summary_table.sort_values('日期', ascending=False)
-            
             st.dataframe(summary_table, use_container_width=True, hide_index=True)
         else:
             st.info("所選區間內無紀錄喵！")
@@ -237,7 +256,7 @@ with tab2:
 
     st.divider()
 
-    # --- 更新：多頁籤 Excel 匯出功能 ---
+    # --- 多頁籤 Excel 匯出功能 ---
     st.subheader("📥 匯出飲食紀錄")
     export_days = st.slider("選擇要匯出過去幾天的紀錄 (Excel格式)", 1, 30, 7)
     
@@ -250,13 +269,9 @@ with tab2:
         export_df = export_df[(export_df['日期'] >= start_date_export) & (export_df['日期'] <= end_date_export)]
     
     if not export_df.empty:
-        # 使用 BytesIO 將 dataframe 轉換為 Excel 格式 (包含明細與每日加總)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # 第一頁：原始明細
             export_df.to_excel(writer, index=False, sheet_name='飲食明細')
-            
-            # 第二頁：每日加總
             summary_export = export_df.groupby('日期')[['熱量(kcal)', '蛋白質(g)', '碳水(g)', '脂肪(g)']].sum().reset_index()
             summary_export.to_excel(writer, index=False, sheet_name='每日總計')
             
