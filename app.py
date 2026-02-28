@@ -10,7 +10,6 @@ st.set_page_config(page_title="喵！全能減重戰鬥儀", page_icon="🐾", l
 if 'history' not in st.session_state:
     st.session_state.history = pd.DataFrame(columns=['日期', '體重', '體脂', '肌肉量', '內臟脂肪', '基礎代謝率', '水分'])
     
-# 為了相容新版本，如果舊的 diet_log 沒有日期或餐別，直接重新初始化
 if 'diet_log' not in st.session_state or '日期' not in st.session_state.diet_log.columns:
     st.session_state.diet_log = pd.DataFrame(columns=['日期', '餐別', '食物名稱', '熱量(kcal)', '蛋白質(g)', '碳水(g)', '脂肪(g)'])
     
@@ -88,7 +87,6 @@ with tab1:
             daily_target = int(tdee - (weekly_loss * 7700 / 7)) 
             st.session_state.daily_target = daily_target
             
-            # 將三大營養素存入 session_state 供 Tab 2 對比使用
             st.session_state.target_p = int(weight * 2)
             st.session_state.target_c = int((daily_target * 0.4) / 4)
             st.session_state.target_f = int((daily_target * 0.25) / 9)
@@ -103,7 +101,7 @@ with tab1:
             m_col4.metric("🥑 脂肪", f"{st.session_state.target_f} g")
 
 # ==========================================
-# Tab 2: 飲食記帳本 (日期、分組、刪除與匯出)
+# Tab 2: 飲食記帳本 
 # ==========================================
 with tab2:
     st.subheader("🍽️ 新增飲食紀錄")
@@ -149,12 +147,11 @@ with tab2:
 
     st.divider()
 
-    # --- 顯示該日紀錄、總計與刪除功能 ---
-    view_date = st.date_input("📅 選擇要查看的日期紀錄", datetime.today(), key="view_date")
+    # --- 單日明細檢視 ---
+    view_date = st.date_input("📅 選擇要查看的單日紀錄", datetime.today(), key="view_date")
     daily_df = st.session_state.diet_log[st.session_state.diet_log['日期'] == view_date]
     
     if not daily_df.empty:
-        # 計算加總
         total_cal = daily_df['熱量(kcal)'].sum()
         total_p = daily_df['蛋白質(g)'].sum()
         total_c = daily_df['碳水(g)'].sum()
@@ -165,8 +162,7 @@ with tab2:
         t_c = st.session_state.target_c
         t_f = st.session_state.target_f
 
-        # 顯示儀表板
-        st.subheader(f"📊 {view_date} 的攝取狀況")
+        st.subheader(f"📊 {view_date} 單日攝取狀況")
         if t_cal > 0:
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("總熱量 (kcal)", f"{round(total_cal)} / {t_cal}", f"剩餘 {t_cal - round(total_cal)} kcal", delta_color="normal")
@@ -174,7 +170,6 @@ with tab2:
             m3.metric("碳水 (g)", f"{round(total_c)} / {t_c}", f"剩餘 {t_c - round(total_c)} g", delta_color="normal")
             m4.metric("脂肪 (g)", f"{round(total_f)} / {t_f}", f"剩餘 {t_f - round(total_f)} g", delta_color="normal")
 
-            # 貓咪教練的智能提醒
             st.markdown("### 💡 貓咪教練的加餐建議")
             diff_p = t_p - total_p
             diff_c = t_c - total_c
@@ -183,14 +178,19 @@ with tab2:
             if total_cal > t_cal:
                 st.error("⚠️ 逼逼！熱量已經超標囉！接下來請多喝水，或是稍微去散散步消耗一下喵！")
             else:
-                if diff_p > 15: st.warning(f"🍗 **蛋白質嚴重不足** (差 {round(diff_p)}g)！下餐建議補充：雞胸肉、雞蛋、無糖豆漿或希臘優格。")
-                if diff_c > 20: st.info(f"🍠 **碳水還未達標** (差 {round(diff_c)}g)！可以補充一些優質澱粉：地瓜、燕麥、糙米飯。")
-                if diff_f > 10: st.info(f"🥑 **脂肪還可以吃點** (差 {round(diff_f)}g)！建議補充健康油脂：無調味堅果、酪梨、或是一小塊鮭魚。")
-                if diff_p <= 15 and diff_c <= 20 and diff_f <= 10:
+                has_warning = False
+                if diff_p > 15: 
+                    st.warning(f"🍗 **蛋白質嚴重不足** (差 {round(diff_p)}g)！下餐建議補充：雞胸肉、雞蛋、無糖豆漿或希臘優格。")
+                    has_warning = True
+                if diff_c > 20: 
+                    st.info(f"🍠 **碳水還未達標** (差 {round(diff_c)}g)！可以補充一些優質澱粉：地瓜、燕麥、糙米飯。")
+                    has_warning = True
+                if diff_f > 10: 
+                    st.info(f"🥑 **脂肪還可以吃點** (差 {round(diff_f)}g)！建議補充健康油脂：無調味堅果、酪梨、或是一小塊鮭魚。")
+                    has_warning = True
+                if not has_warning:
                     st.success("🎉 太完美了！今天的營養素都快達標且非常均衡，給你一個大大的貓掌印 🐾！")
 
-        # 顯示分餐紀錄與刪除按鈕
-        st.markdown("### 📝 詳細明細")
         for meal in ["早餐", "午餐", "晚餐", "點心/宵夜"]:
             meal_df = daily_df[daily_df['餐別'] == meal]
             if not meal_df.empty:
@@ -201,33 +201,69 @@ with tab2:
                     if c_btn.button("❌ 刪除", key=f"del_{idx}"):
                         st.session_state.diet_log = st.session_state.diet_log.drop(idx)
                         st.rerun()
-
     else:
         st.info(f"{view_date} 暫無飲食紀錄喔喵！")
 
     st.divider()
 
-    # --- Excel 匯出功能 ---
+    # --- 新增：歷史數據總覽 (週/月 表格) ---
+    st.subheader("📆 歷史數據總覽")
+    view_range = st.radio("檢視範圍", ["近 7 天 (週)", "近 30 天 (月)", "全部紀錄"], horizontal=True)
+    
+    if not st.session_state.diet_log.empty:
+        df_history = st.session_state.diet_log.copy()
+        df_history['日期'] = pd.to_datetime(df_history['日期']).dt.date
+        today_date = datetime.today().date()
+        
+        # 依照選擇範圍篩選
+        if "7" in view_range:
+            cutoff = today_date - timedelta(days=7)
+            df_history = df_history[df_history['日期'] > cutoff]
+        elif "30" in view_range:
+            cutoff = today_date - timedelta(days=30)
+            df_history = df_history[df_history['日期'] > cutoff]
+            
+        if not df_history.empty:
+            # 依照日期進行加總
+            summary_table = df_history.groupby('日期')[['熱量(kcal)', '蛋白質(g)', '碳水(g)', '脂肪(g)']].sum().reset_index()
+            # 將最新的日期排在最上面
+            summary_table = summary_table.sort_values('日期', ascending=False)
+            
+            st.dataframe(summary_table, use_container_width=True, hide_index=True)
+        else:
+            st.info("所選區間內無紀錄喵！")
+    else:
+        st.info("目前還沒有任何飲食紀錄喵！")
+
+    st.divider()
+
+    # --- 更新：多頁籤 Excel 匯出功能 ---
     st.subheader("📥 匯出飲食紀錄")
     export_days = st.slider("選擇要匯出過去幾天的紀錄 (Excel格式)", 1, 30, 7)
     
     end_date_export = datetime.today().date()
     start_date_export = end_date_export - timedelta(days=export_days)
     
-    export_df = st.session_state.diet_log[
-        (pd.to_datetime(st.session_state.diet_log['日期']).dt.date >= start_date_export) &
-        (pd.to_datetime(st.session_state.diet_log['日期']).dt.date <= end_date_export)
-    ]
+    export_df = st.session_state.diet_log.copy()
+    if not export_df.empty:
+        export_df['日期'] = pd.to_datetime(export_df['日期']).dt.date
+        export_df = export_df[(export_df['日期'] >= start_date_export) & (export_df['日期'] <= end_date_export)]
     
     if not export_df.empty:
-        # 使用 BytesIO 將 dataframe 轉換為 Excel 格式 (利用 pandas 內建的 xlsxwriter 或 openpyxl)
+        # 使用 BytesIO 將 dataframe 轉換為 Excel 格式 (包含明細與每日加總)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            # 第一頁：原始明細
             export_df.to_excel(writer, index=False, sheet_name='飲食明細')
+            
+            # 第二頁：每日加總
+            summary_export = export_df.groupby('日期')[['熱量(kcal)', '蛋白質(g)', '碳水(g)', '脂肪(g)']].sum().reset_index()
+            summary_export.to_excel(writer, index=False, sheet_name='每日總計')
+            
         excel_data = output.getvalue()
 
         st.download_button(
-            label=f"📊 下載這 {export_days} 天的紀錄 (Excel)",
+            label=f"📊 下載這 {export_days} 天的紀錄 (包含明細與總計)",
             data=excel_data,
             file_name=f"喵教練_飲食紀錄_{end_date_export}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -274,7 +310,6 @@ with tab4:
         fig.add_trace(go.Scatter(x=df['日期'], y=df['體重'], mode='lines+markers', 
             name='📈 過去實際體重', line=dict(color='#ff9f43', width=4), marker=dict(size=8, color='#ff9f43')))
         
-        # 使用今天（或最新一筆）的熱量來模擬
         today_df = st.session_state.diet_log[pd.to_datetime(st.session_state.diet_log['日期']).dt.date == datetime.today().date()]
         total_cal_today = today_df['熱量(kcal)'].sum() if not today_df.empty else 0
         current_tdee = st.session_state.current_tdee
