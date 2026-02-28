@@ -1,212 +1,225 @@
-import streamlit as st
-import pandas as pd
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
+import tkinter as tk
+from tkinter import ttk, messagebox
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.dates as mdates
+import datetime
 
-st.set_page_config(page_title="喵！全能減重戰鬥儀", page_icon="🐾", layout="wide")
+class FitnessTrackerApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("飲食與體重趨勢紀錄")
+        self.root.geometry("800x850")
+        self.root.configure(padx=20, pady=20)
 
-# --- 初始化資料庫 ---
-if 'history' not in st.session_state:
-    st.session_state.history = pd.DataFrame(columns=['日期', '體重', '體脂', '肌肉量', '內臟脂肪', '基礎代謝率', '水分'])
-if 'diet_log' not in st.session_state:
-    st.session_state.diet_log = pd.DataFrame(columns=['食物名稱', '熱量(kcal)', '蛋白質(g)', '碳水(g)', '脂肪(g)'])
-if 'target_w' not in st.session_state:
-    st.session_state.target_w = 0.0
-if 'weeks' not in st.session_state:
-    st.session_state.weeks = 12
+        # === 1. TDEE 計算區塊 ===
+        frame_tdee = ttk.LabelFrame(self.root, text="1. 計算 TDEE (每日總熱量消耗)", padding=(10, 10))
+        frame_tdee.pack(fill="x", pady=5)
 
-st.title("🐾 喵！全能減重戰鬥星艦")
-st.write("精準診斷、自動算熱量，並用走勢圖對決你的目標喵！")
+        ttk.Label(frame_tdee, text="基礎代謝率 (BMR):").grid(row=0, column=0, sticky="w", pady=5)
+        self.entry_bmr = ttk.Entry(frame_tdee, width=15)
+        self.entry_bmr.grid(row=0, column=1, padx=10, pady=5)
+        self.entry_bmr.bind("<KeyRelease>", self.calculate_tdee)
 
-tab1, tab2, tab3, tab4 = st.tabs(["📊 1. 數據與診斷", "🍽️ 2. 飲食記帳", "🏃‍♂️ 3. 運動處方", "📈 4. 目標走勢對決"])
+        ttk.Label(frame_tdee, text="平常活動狀態:").grid(row=1, column=0, sticky="w", pady=5)
+        self.activity_var = tk.DoubleVar(value=1.2)
+        activity_options = [
+            ("久坐 (幾乎不運動)", 1.2),
+            ("輕度活動 (每週運動 1-3 天)", 1.375),
+            ("中度活動 (每週運動 3-5 天)", 1.55),
+            ("高度活動 (每週運動 6-7 天)", 1.725),
+            ("極度活動 (勞力工作或高強度訓練)", 1.9)
+        ]
+        self.combo_activity = ttk.Combobox(frame_tdee, width=30, state="readonly")
+        self.combo_activity['values'] = [text for text, val in activity_options]
+        self.combo_activity.current(0)
+        self.combo_activity.grid(row=1, column=1, padx=10, pady=5)
+        self.combo_activity.bind("<<ComboboxSelected>>", self.update_activity_val)
 
-# ==========================================
-# Tab 1: 身體數據與優劣勢診斷
-# ==========================================
-with tab1:
-    st.subheader("📑 Step 1: 記錄今日身體數據")
-    record_date = st.date_input("選擇紀錄日期", datetime.today())
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        height = st.number_input("身高 (cm)", value=0.0, step=0.1)
-        weight = st.number_input("體重 (kg)", value=0.0, step=0.1)
-    with col2:
-        bf = st.number_input("體脂肪率 (%)", value=0.0, step=0.1)
-        muscle = st.number_input("肌肉量 (kg)", value=0.0, step=0.1)
-    with col3:
-        v_fat = st.number_input("內臟脂肪指數", value=0.0, step=0.5)
-        bmr_input = st.number_input("基礎代謝 (kcal)", value=0, step=10)
-    with col4:
-        water = st.number_input("身體水分 (kg)", value=0.0, step=0.1)
-        st.write(" ")
-        if st.button("💾 儲存今日數據", use_container_width=True):
-            if weight > 0:
-                new_data = pd.DataFrame({
-                    '日期': [pd.to_datetime(record_date)],
-                    '體重': [weight], '體脂': [bf], '肌肉量': [muscle],
-                    '內臟脂肪': [v_fat], '基礎代謝率': [bmr_input], '水分': [water]
-                })
-                st.session_state.history = st.session_state.history[st.session_state.history['日期'] != pd.to_datetime(record_date)]
-                st.session_state.history = pd.concat([st.session_state.history, new_data], ignore_index=True)
-                st.session_state.history = st.session_state.history.sort_values('日期')
-                st.success(f"✅ 儲存成功！")
+        self.label_tdee_result = ttk.Label(frame_tdee, text="目前 TDEE: 0 大卡", foreground="red", font=("Arial", 11, "bold"))
+        self.label_tdee_result.grid(row=2, column=0, columnspan=2, sticky="w", pady=10)
+
+        # 儲存活動係數對應的字典，方便查詢
+        self.activity_dict = {text: val for text, val in activity_options}
+
+        # === 2. 食物熱量與營養素輸入區塊 ===
+        frame_food = ttk.LabelFrame(self.root, text="2. 食物熱量與營養素 (輸入部分數值後點擊自動補全)", padding=(10, 10))
+        frame_food.pack(fill="x", pady=5)
+
+        labels = ["總熱量 (kcal)", "蛋白質 (g)", "碳水化合物 (g)", "脂肪 (g)"]
+        self.entries_macro = {}
+        for i, text in enumerate(labels):
+            ttk.Label(frame_food, text=text).grid(row=0, column=i, padx=5, pady=5)
+            entry = ttk.Entry(frame_food, width=12)
+            entry.grid(row=1, column=i, padx=5, pady=5)
+            self.entries_macro[text] = entry
+
+        btn_auto_fill = ttk.Button(frame_food, text="自動計算缺項", command=self.auto_fill_macros)
+        btn_auto_fill.grid(row=2, column=0, columnspan=4, pady=10)
+
+        # 體重設定 (用於圖表起點)
+        frame_settings = ttk.Frame(frame_food)
+        frame_settings.grid(row=3, column=0, columnspan=4, pady=5, sticky="w")
+        ttk.Label(frame_settings, text="目前體重 (kg):").pack(side="left")
+        self.entry_weight = ttk.Entry(frame_settings, width=10)
+        self.entry_weight.insert(0, "70")
+        self.entry_weight.pack(side="left", padx=5)
+
+        # === 3. 趨勢圖區塊 ===
+        frame_chart = ttk.LabelFrame(self.root, text="3. 體重趨勢圖 (未來 30 天模擬)", padding=(10, 10))
+        frame_chart.pack(fill="both", expand=True, pady=5)
+
+        btn_update_chart = ttk.Button(frame_chart, text="更新赤字與圖表", command=self.update_chart)
+        btn_update_chart.pack(pady=5)
+
+        self.fig, self.ax = plt.subplots(figsize=(7, 4))
+        self.canvas = FigureCanvasTkAgg(self.fig, master=frame_chart)
+        self.canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        # 設定圖表鼠標懸停事件
+        self.annot = self.ax.annotate("", xy=(0,0), xytext=(15,15), textcoords="offset points",
+                                      bbox=dict(boxstyle="round", fc="w", alpha=0.9),
+                                      arrowprops=dict(arrowstyle="->"))
+        self.annot.set_visible(False)
+        self.fig.canvas.mpl_connect("motion_notify_event", self.hover)
+
+        self.current_tdee = 0
+
+    def update_activity_val(self, event=None):
+        selected_text = self.combo_activity.get()
+        self.activity_var.set(self.activity_dict[selected_text])
+        self.calculate_tdee()
+
+    def calculate_tdee(self, event=None):
+        try:
+            bmr = float(self.entry_bmr.get())
+            activity = self.activity_var.get()
+            self.current_tdee = bmr * activity
+            self.label_tdee_result.config(text=f"目前 TDEE: {round(self.current_tdee)} 大卡")
+        except ValueError:
+            self.current_tdee = 0
+            self.label_tdee_result.config(text="目前 TDEE: 0 大卡")
+
+    def get_float_or_none(self, entry):
+        val = entry.get().strip()
+        if not val:
+            return None
+        try:
+            return float(val)
+        except ValueError:
+            return None
+
+    def auto_fill_macros(self):
+        cal = self.get_float_or_none(self.entries_macro["總熱量 (kcal)"])
+        p = self.get_float_or_none(self.entries_macro["蛋白質 (g)"])
+        c = self.get_float_or_none(self.entries_macro["碳水化合物 (g)"])
+        f = self.get_float_or_none(self.entries_macro["脂肪 (g)"])
+
+        # 情況 A: 有三大營養素，算總熱量
+        if cal is None and None not in (p, c, f):
+            cal = p * 4 + c * 4 + f * 9
+            self.entries_macro["總熱量 (kcal)"].delete(0, tk.END)
+            self.entries_macro["總熱量 (kcal)"].insert(0, str(round(cal, 1)))
+        
+        # 情況 B: 有總熱量及其中兩個，算剩下的一個
+        elif cal is not None:
+            if p is None and None not in (c, f):
+                p = (cal - c * 4 - f * 9) / 4
+                self.entries_macro["蛋白質 (g)"].delete(0, tk.END)
+                self.entries_macro["蛋白質 (g)"].insert(0, str(max(0, round(p, 1))))
+            elif c is None and None not in (p, f):
+                c = (cal - p * 4 - f * 9) / 4
+                self.entries_macro["碳水化合物 (g)"].delete(0, tk.END)
+                self.entries_macro["碳水化合物 (g)"].insert(0, str(max(0, round(c, 1))))
+            elif f is None and None not in (p, c):
+                f = (cal - p * 4 - c * 4) / 9
+                self.entries_macro["脂肪 (g)"].delete(0, tk.END)
+                self.entries_macro["脂肪 (g)"].insert(0, str(max(0, round(f, 1))))
+
+    def update_chart(self):
+        try:
+            weight = float(self.entry_weight.get())
+            intake_cal = float(self.entries_macro["總熱量 (kcal)"].get())
+        except ValueError:
+            messagebox.showwarning("輸入錯誤", "請確保體重與總熱量皆已填寫完整數值。")
+            return
+
+        if self.current_tdee <= 0:
+            messagebox.showwarning("輸入錯誤", "請先輸入正確的 BMR 並選擇活動量以計算 TDEE。")
+            return
+
+        self.ax.clear()
+
+        # 準備資料：未來 30 天
+        days = 30
+        today = datetime.date.today()
+        dates = [today + datetime.timedelta(days=i) for i in range(days)]
+        
+        # 理論赤字：假設標準每天 -500 大卡 (約每週減 0.5kg)
+        theoretical_deficit = 500
+        theoretical_loss_per_day = theoretical_deficit / 7700
+        theoretical_weights = [weight - (theoretical_loss_per_day * i) for i in range(days)]
+
+        # 實際模擬赤字：依照目前 TDEE 減去輸入的總攝取熱量
+        actual_deficit = self.current_tdee - intake_cal
+        actual_loss_per_day = actual_deficit / 7700
+        actual_weights = [weight - (actual_loss_per_day * i) for i in range(days)]
+
+        # 繪圖
+        self.line_theo, = self.ax.plot(dates, theoretical_weights, linestyle='--', color='blue', label='理論目標 (每日 -500kcal)')
+        self.line_actual, = self.ax.plot(dates, actual_weights, linestyle='-', color='red', label=f'實際模擬 (目前赤字 {round(actual_deficit)}kcal)')
+
+        # 設定 X 軸為日期格式
+        self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+        self.ax.xaxis.set_major_locator(mdates.DayLocator(interval=5))
+        self.fig.autofmt_xdate()
+
+        self.ax.set_title("未來 30 天體重下降模擬")
+        self.ax.set_ylabel("體重 (kg)")
+        self.ax.legend()
+        self.ax.grid(True, linestyle=':', alpha=0.6)
+
+        # 重新加入標註物件 (因為 ax.clear() 會清掉它)
+        self.annot = self.ax.annotate("", xy=(0,0), xytext=(15,15), textcoords="offset points",
+                                      bbox=dict(boxstyle="round", fc="w", alpha=0.9),
+                                      arrowprops=dict(arrowstyle="->"))
+        self.annot.set_visible(False)
+
+        self.canvas.draw()
+
+    def hover(self, event):
+        if event.inaxes == self.ax:
+            # 判斷鼠標靠近哪一條線
+            cont_theo, ind_theo = self.line_theo.contains(event)
+            cont_actual, ind_actual = self.line_actual.contains(event)
+
+            if cont_actual:
+                self.update_annot(self.line_actual, ind_actual, event, "實際")
+                self.annot.set_visible(True)
+                self.canvas.draw_idle()
+            elif cont_theo:
+                self.update_annot(self.line_theo, ind_theo, event, "理論")
+                self.annot.set_visible(True)
+                self.canvas.draw_idle()
             else:
-                st.error("體重必須大於 0 喵！")
+                if self.annot.get_visible():
+                    self.annot.set_visible(False)
+                    self.canvas.draw_idle()
 
-    st.divider()
+    def update_annot(self, line, ind, event, label_prefix):
+        x_data, y_data = line.get_data()
+        idx = ind["ind"][0]
+        x_val, y_val = x_data[idx], y_data[idx]
+        
+        self.annot.xy = (x_val, y_val)
+        
+        # 將 x_val (浮點數) 轉回 datetime 日期
+        date_str = mdates.num2date(x_val).strftime("%Y-%m-%d")
+        text = f"{date_str}\n{label_prefix}體重: {y_val:.2f} kg"
+        self.annot.set_text(text)
+        self.annot.get_bbox_patch().set_alpha(0.9)
 
-    # --- 新增：優勢與劣勢分析 ---
-    if weight > 0 and height > 0:
-        st.subheader("🩺 貓咪教練的身體組成分析")
-        bmi = weight / ((height/100)**2)
-        
-        strengths = []
-        weaknesses = []
-        
-        # 分析邏輯
-        if bmi > 24:
-            if muscle > (weight * 0.4): 
-                strengths.append(f"BMI ({bmi:.1f}) 雖然偏高，但既然有保持重訓習慣，這通常是因為高肌肉量造成的，不需對 BMI 過度恐慌，我們專注看體脂率就好。")
-            else:
-                weaknesses.append(f"BMI ({bmi:.1f}) 落在過重區間，需要開始控制熱量囉。")
-        else:
-            strengths.append(f"BMI ({bmi:.1f}) 落在健康標準範圍內！")
-
-        if bf > 0:
-            if bf < 15: strengths.append(f"體脂率 ({bf}%) 非常精實，腹肌線條應該很明顯了！")
-            elif 15 <= bf <= 20: strengths.append(f"體脂率 ({bf}%) 落在一般男性的健康標準內，維持得不錯。")
-            else: weaknesses.append(f"體脂率 ({bf}%) 偏高，這將是我們接下來減脂的首要打擊目標。")
-            
-        if v_fat > 0:
-            if v_fat < 10: strengths.append(f"內臟脂肪 ({v_fat}) 安全！代表內臟負擔小，飲食狀態算乾淨。")
-            else: weaknesses.append(f"內臟脂肪 ({v_fat}) 偏高，可能有脂肪肝或心血管隱憂，強烈建議減少精緻糖與酒精。")
-
-        c1, c2 = st.columns(2)
-        with c1:
-            st.info("**✅ 你的優勢**\n\n" + "\n\n".join([f"- {s}" for s in strengths]) if strengths else "輸入更多數據以獲取優勢分析！")
-        with c2:
-            st.warning("**⚠️ 需注意的劣勢**\n\n" + "\n\n".join([f"- {w}" for w in weaknesses]) if weaknesses else "目前數據看起來很健康，繼續保持！")
-
-    st.divider()
-
-    # --- 目標設定 ---
-    st.subheader("🎯 Step 2: 你的理想目標")
-    t_c1, t_c2 = st.columns(2)
-    st.session_state.target_w = t_c1.number_input("目標體重 (kg)", value=st.session_state.target_w, step=0.1)
-    st.session_state.weeks = t_c2.slider("預計達成時間 (週)", min_value=4, max_value=52, value=st.session_state.weeks)
-
-    if weight > 0 and st.session_state.target_w > 0:
-        if weight > st.session_state.target_w:
-            total_loss = weight - st.session_state.target_w
-            weekly_loss = total_loss / st.session_state.weeks
-            calc_bmr = bmr_input if bmr_input > 0 else (10 * weight) + (6.25 * height) - (5 * 35) + 5
-            tdee = int(calc_bmr * 1.375)
-            daily_target = int(tdee - (weekly_loss * 7700 / 7)) 
-            st.session_state.daily_target = daily_target
-            
-            st.write(f"### 🍽️ 為了在 **{st.session_state.weeks} 週** 內減去 **{total_loss:.1f} kg**：")
-            m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-            m_col1.metric("建議每日攝取", f"{daily_target} kcal", f"赤字 {int(tdee - daily_target)} kcal", delta_color="inverse")
-            m_col2.metric("🍗 蛋白質", f"{int(weight * 2)} g")
-            m_col3.metric("🍚 碳水", f"{int((daily_target * 0.4) / 4)} g")
-            m_col4.metric("🥑 脂肪", f"{int((daily_target * 0.25) / 9)} g")
-
-# ==========================================
-# Tab 2: 飲食記帳本 (自動計算熱量)
-# ==========================================
-with tab2:
-    st.subheader("🍽️ 營養素記帳本 (程式自動算熱量)")
-    
-    with st.form("diet_form", clear_on_submit=True):
-        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
-        f_name = col_f1.text_input("食物名稱 (如: 雞胸肉)")
-        f_p = col_f2.number_input("蛋白質 (g)", min_value=0, step=1)
-        f_c = col_f3.number_input("碳水化合物 (g)", min_value=0, step=1)
-        f_f = col_f4.number_input("脂肪 (g)", min_value=0, step=1)
-        
-        if st.form_submit_button("➕ 計算熱量並新增"):
-            if f_name:
-                calc_cal = (f_p * 4) + (f_c * 4) + (f_f * 9) # 程式自動計算
-                new_food = pd.DataFrame({'食物名稱': [f_name], '熱量(kcal)': [calc_cal], '蛋白質(g)': [f_p], '碳水(g)': [f_c], '脂肪(g)': [f_f]})
-                st.session_state.diet_log = pd.concat([st.session_state.diet_log, new_food], ignore_index=True)
-                st.success(f"✅ {f_name} 已新增！自動計算熱量為 {calc_cal} kcal。")
-
-    if not st.session_state.diet_log.empty:
-        st.dataframe(st.session_state.diet_log, use_container_width=True)
-        total_cal = st.session_state.diet_log['熱量(kcal)'].sum()
-        target = st.session_state.get('daily_target', 0)
-        
-        if target > 0:
-            st.metric("今日已攝取 / 建議總量", f"{total_cal} / {target} kcal", f"剩餘扣打 {target - total_cal} kcal", delta_color="normal")
-        if st.button("🗑️ 清空今日清單"):
-            st.session_state.diet_log = st.session_state.diet_log.iloc[0:0]
-            st.rerun()
-
-# ==========================================
-# Tab 3: 運動處方
-# ==========================================
-with tab3:
-    st.subheader("🏃‍♂️ 專屬安全運動處方")
-    st.write("目前依據你的身體指標，建議如下：")
-    st.markdown('''
-    * **🔴 阻力訓練：** 優先強化核心與下肢，多做深蹲、硬舉等大肌群動作，有助於維持代謝。
-    * **🎾 靈活心肺：** 將有氧融入興趣中（如網球），比單純跑步更能持之以恆。
-    * **🚶‍♂️ 日常 NEAT：** 跑業務時盡量用走路取代短程騎車，增加非運動性熱量消耗。
-    ''')
-
-# ==========================================
-# Tab 4: 目標走勢對決 (實際 vs 理論模擬)
-# ==========================================
-with tab4:
-    st.subheader("📈 體重走勢大對決")
-    
-    df = st.session_state.history.copy()
-    if not df.empty and st.session_state.target_w > 0:
-        df['日期'] = pd.to_datetime(df['日期'])
-        df = df.sort_values('日期')
-        
-        # 抓取第一筆資料作為起點
-        start_date = df['日期'].iloc[0]
-        start_weight = df['體重'].iloc[0]
-        
-        # 計算理論終點
-        end_date = start_date + timedelta(weeks=st.session_state.weeks)
-        target_weight = st.session_state.target_w
-        
-        fig = go.Figure()
-        
-        # 1. 畫出理論目標走勢 (灰色虛線)
-        fig.add_trace(go.Scatter(
-            x=[start_date, end_date], 
-            y=[start_weight, target_weight], 
-            mode='lines', 
-            name='🎯 理論目標走勢 (基於你的赤字設定)', 
-            line=dict(color='rgba(150, 150, 150, 0.7)', width=3, dash='dash')
-        ))
-        
-        # 2. 畫出實際體重走勢 (橘色實線)
-        fig.add_trace(go.Scatter(
-            x=df['日期'], 
-            y=df['體重'], 
-            mode='lines+markers', 
-            name='📈 你的實際體重', 
-            line=dict(color='#ff9f43', width=4),
-            marker=dict(size=8, color='#ff9f43')
-        ))
-        
-        fig.update_layout(
-            title="實際體重 vs 模擬目標走勢",
-            xaxis_title="日期",
-            yaxis_title="體重 (kg)",
-            hovermode="x unified",
-            height=500
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-        st.info("💡 **走勢圖怎麼看？** 如果橘線（實際體重）落在灰線（目標走勢）的下方，代表你減重進度超前！如果跑到灰線上方，代表你需要稍微嚴格控制飲食或增加活動量了喵！")
-        
-        st.write("### 🗃️ 歷史紀錄明細")
-        st.dataframe(df.sort_values('日期', ascending=False), use_container_width=True)
-    else:
-        st.warning("📭 請先在第一頁「儲存至少一筆身體數據」並設定「目標體重」，才能產生走勢對決圖喵！")
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = FitnessTrackerApp(root)
+    root.mainloop()
