@@ -14,6 +14,8 @@ if 'target_w' not in st.session_state:
     st.session_state.target_w = 0.0
 if 'weeks' not in st.session_state:
     st.session_state.weeks = 12
+if 'current_tdee' not in st.session_state:
+    st.session_state.current_tdee = 0
 
 st.title("🐾 喵！全能減重戰鬥星艦")
 st.write("精準診斷、自動算熱量，並用走勢圖對決你的目標喵！")
@@ -39,24 +41,33 @@ with tab1:
         bmr_input = st.number_input("基礎代謝 (kcal)", value=0, step=10)
     with col4:
         water = st.number_input("身體水分 (kg)", value=0.0, step=0.1)
-        st.write(" ")
-        if st.button("💾 儲存今日數據", use_container_width=True):
-            if weight > 0:
-                new_data = pd.DataFrame({
-                    '日期': [pd.to_datetime(record_date)],
-                    '體重': [weight], '體脂': [bf], '肌肉量': [muscle],
-                    '內臟脂肪': [v_fat], '基礎代謝率': [bmr_input], '水分': [water]
-                })
-                st.session_state.history = st.session_state.history[st.session_state.history['日期'] != pd.to_datetime(record_date)]
-                st.session_state.history = pd.concat([st.session_state.history, new_data], ignore_index=True)
-                st.session_state.history = st.session_state.history.sort_values('日期')
-                st.success(f"✅ 儲存成功！")
-            else:
-                st.error("體重必須大於 0 喵！")
+        # 新增：活動量選單
+        activity_options = {
+            "久坐 (幾乎不運動)": 1.2,
+            "輕度活動 (1-3天/週)": 1.375,
+            "中度活動 (3-5天/週)": 1.55,
+            "高度活動 (6-7天/週)": 1.725,
+            "極度活動 (高強度)": 1.9
+        }
+        activity_text = st.selectbox("平常活動狀態", list(activity_options.keys()))
+
+    if st.button("💾 儲存今日數據", use_container_width=True):
+        if weight > 0:
+            new_data = pd.DataFrame({
+                '日期': [pd.to_datetime(record_date)],
+                '體重': [weight], '體脂': [bf], '肌肉量': [muscle],
+                '內臟脂肪': [v_fat], '基礎代謝率': [bmr_input], '水分': [water]
+            })
+            st.session_state.history = st.session_state.history[st.session_state.history['日期'] != pd.to_datetime(record_date)]
+            st.session_state.history = pd.concat([st.session_state.history, new_data], ignore_index=True)
+            st.session_state.history = st.session_state.history.sort_values('日期')
+            st.success(f"✅ 儲存成功喵！")
+        else:
+            st.error("體重必須大於 0 喵！")
 
     st.divider()
 
-    # --- 新增：優勢與劣勢分析 ---
+    # --- 優勢與劣勢分析 ---
     if weight > 0 and height > 0:
         st.subheader("🩺 貓咪教練的身體組成分析")
         bmi = weight / ((height/100)**2)
@@ -64,7 +75,6 @@ with tab1:
         strengths = []
         weaknesses = []
         
-        # 分析邏輯
         if bmi > 24:
             if muscle > (weight * 0.4): 
                 strengths.append(f"BMI ({bmi:.1f}) 雖然偏高，但既然有保持重訓習慣，這通常是因為高肌肉量造成的，不需對 BMI 過度恐慌，我們專注看體脂率就好。")
@@ -90,7 +100,7 @@ with tab1:
 
     st.divider()
 
-    # --- 目標設定 ---
+    # --- 目標設定與 TDEE 結算 ---
     st.subheader("🎯 Step 2: 你的理想目標")
     t_c1, t_c2 = st.columns(2)
     st.session_state.target_w = t_c1.number_input("目標體重 (kg)", value=st.session_state.target_w, step=0.1)
@@ -100,12 +110,18 @@ with tab1:
         if weight > st.session_state.target_w:
             total_loss = weight - st.session_state.target_w
             weekly_loss = total_loss / st.session_state.weeks
+            
+            # 結合 BMR 與活動量選單推算 TDEE
             calc_bmr = bmr_input if bmr_input > 0 else (10 * weight) + (6.25 * height) - (5 * 35) + 5
-            tdee = int(calc_bmr * 1.375)
+            tdee = int(calc_bmr * activity_options[activity_text])
+            st.session_state.current_tdee = tdee # 存入全域供圖表使用
+            
             daily_target = int(tdee - (weekly_loss * 7700 / 7)) 
             st.session_state.daily_target = daily_target
             
             st.write(f"### 🍽️ 為了在 **{st.session_state.weeks} 週** 內減去 **{total_loss:.1f} kg**：")
+            st.write(f"系統判定你的 TDEE 約為 **{tdee} kcal**喵！")
+            
             m_col1, m_col2, m_col3, m_col4 = st.columns(4)
             m_col1.metric("建議每日攝取", f"{daily_target} kcal", f"赤字 {int(tdee - daily_target)} kcal", delta_color="inverse")
             m_col2.metric("🍗 蛋白質", f"{int(weight * 2)} g")
@@ -113,24 +129,54 @@ with tab1:
             m_col4.metric("🥑 脂肪", f"{int((daily_target * 0.25) / 9)} g")
 
 # ==========================================
-# Tab 2: 飲食記帳本 (自動計算熱量)
+# Tab 2: 飲食記帳本 (4欄位自動補全缺項)
 # ==========================================
 with tab2:
-    st.subheader("🍽️ 營養素記帳本 (程式自動算熱量)")
+    st.subheader("🍽️ 營養素記帳本 (輸入部分數值，程式自動算缺項)")
     
     with st.form("diet_form", clear_on_submit=True):
+        f_name = st.text_input("食物名稱 (如: 雞胸肉)")
         col_f1, col_f2, col_f3, col_f4 = st.columns(4)
-        f_name = col_f1.text_input("食物名稱 (如: 雞胸肉)")
-        f_p = col_f2.number_input("蛋白質 (g)", min_value=0, step=1)
-        f_c = col_f3.number_input("碳水化合物 (g)", min_value=0, step=1)
-        f_f = col_f4.number_input("脂肪 (g)", min_value=0, step=1)
         
-        if st.form_submit_button("➕ 計算熱量並新增"):
+        # value=None 允許欄位初始為空白
+        f_cal = col_f1.number_input("總熱量 (kcal) [可留白]", value=None, min_value=0.0, step=10.0)
+        f_p = col_f2.number_input("蛋白質 (g) [可留白]", value=None, min_value=0.0, step=1.0)
+        f_c = col_f3.number_input("碳水 (g) [可留白]", value=None, min_value=0.0, step=1.0)
+        f_f = col_f4.number_input("脂肪 (g) [可留白]", value=None, min_value=0.0, step=1.0)
+        
+        submitted = st.form_submit_button("➕ 計算缺項並新增記錄")
+        
+        if submitted:
             if f_name:
-                calc_cal = (f_p * 4) + (f_c * 4) + (f_f * 9) # 程式自動計算
-                new_food = pd.DataFrame({'食物名稱': [f_name], '熱量(kcal)': [calc_cal], '蛋白質(g)': [f_p], '碳水(g)': [f_c], '脂肪(g)': [f_f]})
+                cal, p, c, f = f_cal, f_p, f_c, f_f
+                
+                # 邏輯 A: 填了三大營養素，推算總熱量
+                if cal is None and None not in (p, c, f):
+                    cal = (p * 4) + (c * 4) + (f * 9)
+                
+                # 邏輯 B: 填了總熱量及其中兩項，推算剩下的一項
+                elif cal is not None:
+                    if p is None and None not in (c, f):
+                        p = max(0.0, (cal - c * 4 - f * 9) / 4)
+                    elif c is None and None not in (p, f):
+                        c = max(0.0, (cal - p * 4 - f * 9) / 4)
+                    elif f is None and None not in (p, c):
+                        f = max(0.0, (cal - p * 4 - c * 4) / 9)
+
+                # 處理完全沒填的防呆 (轉為 0)
+                cal = cal if cal is not None else 0.0
+                p = p if p is not None else 0.0
+                c = c if c is not None else 0.0
+                f = f if f is not None else 0.0
+
+                new_food = pd.DataFrame({
+                    '食物名稱': [f_name], '熱量(kcal)': [round(cal, 1)], 
+                    '蛋白質(g)': [round(p, 1)], '碳水(g)': [round(c, 1)], '脂肪(g)': [round(f, 1)]
+                })
                 st.session_state.diet_log = pd.concat([st.session_state.diet_log, new_food], ignore_index=True)
-                st.success(f"✅ {f_name} 已新增！自動計算熱量為 {calc_cal} kcal。")
+                st.success(f"✅ {f_name} 已新增！系統已自動補全空缺數值喵！")
+            else:
+                st.warning("請先輸入食物名稱喔喵！")
 
     if not st.session_state.diet_log.empty:
         st.dataframe(st.session_state.diet_log, use_container_width=True)
@@ -138,7 +184,7 @@ with tab2:
         target = st.session_state.get('daily_target', 0)
         
         if target > 0:
-            st.metric("今日已攝取 / 建議總量", f"{total_cal} / {target} kcal", f"剩餘扣打 {target - total_cal} kcal", delta_color="normal")
+            st.metric("今日已攝取 / 建議總量", f"{round(total_cal)} / {target} kcal", f"剩餘扣打 {target - round(total_cal)} kcal", delta_color="normal")
         if st.button("🗑️ 清空今日清單"):
             st.session_state.diet_log = st.session_state.diet_log.iloc[0:0]
             st.rerun()
@@ -156,7 +202,7 @@ with tab3:
     ''')
 
 # ==========================================
-# Tab 4: 目標走勢對決 (實際 vs 理論模擬)
+# Tab 4: 目標走勢對決 (歷史 vs 理論 vs 模擬)
 # ==========================================
 with tab4:
     st.subheader("📈 體重走勢大對決")
@@ -166,9 +212,11 @@ with tab4:
         df['日期'] = pd.to_datetime(df['日期'])
         df = df.sort_values('日期')
         
-        # 抓取第一筆資料作為起點
+        # 抓取第一筆與最新一筆資料
         start_date = df['日期'].iloc[0]
         start_weight = df['體重'].iloc[0]
+        latest_date = df['日期'].iloc[-1]
+        latest_weight = df['體重'].iloc[-1]
         
         # 計算理論終點
         end_date = start_date + timedelta(weeks=st.session_state.weeks)
@@ -181,20 +229,40 @@ with tab4:
             x=[start_date, end_date], 
             y=[start_weight, target_weight], 
             mode='lines', 
-            name='🎯 理論目標走勢 (基於你的赤字設定)', 
+            name='🎯 理論目標走勢 (基礎設定)', 
             line=dict(color='rgba(150, 150, 150, 0.7)', width=3, dash='dash')
         ))
         
-        # 2. 畫出實際體重走勢 (橘色實線)
+        # 2. 畫出實際歷史紀錄 (橘色實線)
         fig.add_trace(go.Scatter(
             x=df['日期'], 
             y=df['體重'], 
             mode='lines+markers', 
-            name='📈 你的實際體重', 
+            name='📈 過去實際體重', 
             line=dict(color='#ff9f43', width=4),
             marker=dict(size=8, color='#ff9f43')
         ))
         
+        # 3. 畫出未來 30 天赤字模擬走勢 (紅色虛線)
+        total_cal_today = st.session_state.diet_log['熱量(kcal)'].sum() if not st.session_state.diet_log.empty else 0
+        current_tdee = st.session_state.current_tdee
+        
+        if current_tdee > 0 and total_cal_today > 0:
+            sim_days = 30
+            sim_dates = [latest_date + timedelta(days=i) for i in range(sim_days)]
+            actual_deficit = current_tdee - total_cal_today
+            loss_per_day = actual_deficit / 7700
+            sim_weights = [latest_weight - (loss_per_day * i) for i in range(sim_days)]
+            
+            fig.add_trace(go.Scatter(
+                x=sim_dates, 
+                y=sim_weights, 
+                mode='lines', 
+                name=f'🚀 未來模擬 (依今日赤字 {int(actual_deficit)}kcal)', 
+                line=dict(color='#ff4757', width=3, dash='dot')
+            ))
+        
+        # 介面設定 (hovermode="x unified" 讓滑鼠懸浮時會同時對齊顯示日期與各線數值)
         fig.update_layout(
             title="實際體重 vs 模擬目標走勢",
             xaxis_title="日期",
@@ -204,9 +272,9 @@ with tab4:
         )
         st.plotly_chart(fig, use_container_width=True)
         
-        st.info("💡 **走勢圖怎麼看？** 如果橘線（實際體重）落在灰線（目標走勢）的下方，代表你減重進度超前！如果跑到灰線上方，代表你需要稍微嚴格控制飲食或增加活動量了喵！")
+        st.info("💡 **走勢圖怎麼看？** 橘線是過去的紀錄。如果紅色的「未來模擬線」比灰色的「理論目標線」更陡、更低，代表只要維持今天的熱量赤字，你就能提早達標喵！")
         
         st.write("### 🗃️ 歷史紀錄明細")
         st.dataframe(df.sort_values('日期', ascending=False), use_container_width=True)
     else:
-        st.warning("📭 請先在第一頁「儲存至少一筆身體數據」並設定「目標體重」，才能產生走勢對決圖喵！")
+        st.warning("📭 請先在第一頁「儲存至少一筆數據」並設定「目標」，然後在第二頁「輸入今日飲食」後，就能看到完整的未來模擬圖表喵！")
