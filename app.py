@@ -9,7 +9,7 @@ class FitnessTrackerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("飲食與體重趨勢紀錄")
-        self.root.geometry("800x850")
+        self.root.geometry("800x800")
         self.root.configure(padx=20, pady=20)
 
         # === 1. TDEE 計算區塊 ===
@@ -39,7 +39,6 @@ class FitnessTrackerApp:
         self.label_tdee_result = ttk.Label(frame_tdee, text="目前 TDEE: 0 大卡", foreground="red", font=("Arial", 11, "bold"))
         self.label_tdee_result.grid(row=2, column=0, columnspan=2, sticky="w", pady=10)
 
-        # 儲存活動係數對應的字典，方便查詢
         self.activity_dict = {text: val for text, val in activity_options}
 
         # === 2. 食物熱量與營養素輸入區塊 ===
@@ -57,7 +56,6 @@ class FitnessTrackerApp:
         btn_auto_fill = ttk.Button(frame_food, text="自動計算缺項", command=self.auto_fill_macros)
         btn_auto_fill.grid(row=2, column=0, columnspan=4, pady=10)
 
-        # 體重設定 (用於圖表起點)
         frame_settings = ttk.Frame(frame_food)
         frame_settings.grid(row=3, column=0, columnspan=4, pady=5, sticky="w")
         ttk.Label(frame_settings, text="目前體重 (kg):").pack(side="left")
@@ -75,13 +73,6 @@ class FitnessTrackerApp:
         self.fig, self.ax = plt.subplots(figsize=(7, 4))
         self.canvas = FigureCanvasTkAgg(self.fig, master=frame_chart)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
-
-        # 設定圖表鼠標懸停事件
-        self.annot = self.ax.annotate("", xy=(0,0), xytext=(15,15), textcoords="offset points",
-                                      bbox=dict(boxstyle="round", fc="w", alpha=0.9),
-                                      arrowprops=dict(arrowstyle="->"))
-        self.annot.set_visible(False)
-        self.fig.canvas.mpl_connect("motion_notify_event", self.hover)
 
         self.current_tdee = 0
 
@@ -166,8 +157,8 @@ class FitnessTrackerApp:
         actual_weights = [weight - (actual_loss_per_day * i) for i in range(days)]
 
         # 繪圖
-        self.line_theo, = self.ax.plot(dates, theoretical_weights, linestyle='--', color='blue', label='理論目標 (每日 -500kcal)')
-        self.line_actual, = self.ax.plot(dates, actual_weights, linestyle='-', color='red', label=f'實際模擬 (目前赤字 {round(actual_deficit)}kcal)')
+        self.ax.plot(dates, theoretical_weights, linestyle='--', color='blue', label='理論目標 (每日 -500kcal)')
+        self.ax.plot(dates, actual_weights, linestyle='-', color='red', label=f'實際模擬 (目前赤字 {round(actual_deficit)}kcal)')
 
         # 設定 X 軸為日期格式
         self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
@@ -179,45 +170,7 @@ class FitnessTrackerApp:
         self.ax.legend()
         self.ax.grid(True, linestyle=':', alpha=0.6)
 
-        # 重新加入標註物件 (因為 ax.clear() 會清掉它)
-        self.annot = self.ax.annotate("", xy=(0,0), xytext=(15,15), textcoords="offset points",
-                                      bbox=dict(boxstyle="round", fc="w", alpha=0.9),
-                                      arrowprops=dict(arrowstyle="->"))
-        self.annot.set_visible(False)
-
         self.canvas.draw()
-
-    def hover(self, event):
-        if event.inaxes == self.ax:
-            # 判斷鼠標靠近哪一條線
-            cont_theo, ind_theo = self.line_theo.contains(event)
-            cont_actual, ind_actual = self.line_actual.contains(event)
-
-            if cont_actual:
-                self.update_annot(self.line_actual, ind_actual, event, "實際")
-                self.annot.set_visible(True)
-                self.canvas.draw_idle()
-            elif cont_theo:
-                self.update_annot(self.line_theo, ind_theo, event, "理論")
-                self.annot.set_visible(True)
-                self.canvas.draw_idle()
-            else:
-                if self.annot.get_visible():
-                    self.annot.set_visible(False)
-                    self.canvas.draw_idle()
-
-    def update_annot(self, line, ind, event, label_prefix):
-        x_data, y_data = line.get_data()
-        idx = ind["ind"][0]
-        x_val, y_val = x_data[idx], y_data[idx]
-        
-        self.annot.xy = (x_val, y_val)
-        
-        # 將 x_val (浮點數) 轉回 datetime 日期
-        date_str = mdates.num2date(x_val).strftime("%Y-%m-%d")
-        text = f"{date_str}\n{label_prefix}體重: {y_val:.2f} kg"
-        self.annot.set_text(text)
-        self.annot.get_bbox_patch().set_alpha(0.9)
 
 if __name__ == "__main__":
     root = tk.Tk()
